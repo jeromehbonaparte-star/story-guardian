@@ -3,9 +3,8 @@
  * Validates AI responses against storytelling guidelines and auto-corrects common issues
  */
 
-import { saveSettingsDebounced } from '../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
-import { eventSource, event_types } from '../../../../script.js';
+import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 
 const extensionName = 'story-guardian';
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
