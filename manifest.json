@@ -1,0 +1,11 @@
+{
+    "display_name": "Story Guardian",
+    "loading_order": 50,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Claude Code",
+    "version": "1.0.0",
+    "homePage": "https://github.com/story-guardian"
+}

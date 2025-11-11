@@ -1,0 +1,78 @@
+/* Story Guardian Extension Styles */
+
+#story_guardian_settings {
+    margin: 10px 0;
+}
+
+#story-guardian-warnings {
+    margin-top: 15px;
+    padding: 10px;
+    background: rgba(255, 200, 0, 0.1);
+    border-left: 3px solid #ffc800;
+    border-radius: 4px;
+}
+
+.story-guardian-warning-list h4 {
+    margin: 0 0 10px 0;
+    color: #ffc800;
+    font-size: 14px;
+}
+
+.warning-item {
+    margin: 8px 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.warning-item.severity-high {
+    border-left: 3px solid #ff4444;
+}
+
+.warning-item.severity-medium {
+    border-left: 3px solid #ffaa00;
+}
+
+.warning-item.severity-low {
+    border-left: 3px solid #ffdd00;
+}
+
+.warning-type {
+    display: inline-block;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    font-weight: bold;
+    font-size: 10px;
+    text-transform: uppercase;
+    margin-right: 8px;
+}
+
+.warning-message {
+    color: #fff;
+}
+
+.warning-text {
+    margin-top: 5px;
+    padding: 5px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 3px;
+    font-style: italic;
+    color: #ccc;
+    font-size: 11px;
+}
+
+#story_guardian_settings .checkbox_label {
+    display: flex;
+    align-items: center;
+    margin: 8px 0;
+}
+
+#story_guardian_settings h4 {
+    margin: 15px 0 8px 0;
+    font-size: 13px;
+    color: #ffc800;
+    border-bottom: 1px solid rgba(255, 200, 0, 0.3);
+    padding-bottom: 5px;
+}
