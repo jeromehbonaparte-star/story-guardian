@@ -1,0 +1,25 @@
+Steps to Push Story Guardian to GitHub
+==========================================
+
+1. Create Repository on GitHub:
+   - Go to: https://github.com/new
+   - Name: story-guardian
+   - Description: SillyTavern extension that validates and auto-corrects LLM outputs against storytelling guidelines
+   - Public
+   - DO NOT initialize with README, license, or gitignore
+   - Click "Create repository"
+
+2. After creating the repo, run these commands:
+
+cd "J:\Claude Code\Github Desktop\story-guardian"
+git remote add origin https://github.com/jeromehbonaparte-star/story-guardian.git
+git branch -M main
+git push -u origin main
+
+3. Your extension will be live at:
+   https://github.com/jeromehbonaparte-star/story-guardian
+
+Installation URL for SillyTavern:
+https://github.com/jeromehbonaparte-star/story-guardian
+
+OR tell me when you've created the repo and I'll push it for you!

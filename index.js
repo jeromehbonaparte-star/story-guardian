@@ -4,7 +4,7 @@
  */
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced, generateQuietPrompt } from '../../../../script.js';
+import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced, generateRaw, substituteParams } from '../../../../script.js';
 
 const extensionName = 'story-guardian';
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
@@ -84,9 +84,8 @@ async function init() {
     }
 
     // Register event listeners
-    // Use MESSAGE_SWIPED to catch all message events (including generation)
+    eventSource.on(event_types.MESSAGE_RECEIVED, handleMessageEvent);
     eventSource.on(event_types.MESSAGE_SWIPED, handleMessageEvent);
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleMessageEvent);
 
     // Add UI
     await loadSettingsHTML();
@@ -148,52 +147,106 @@ REQUIRED ENDING TYPES:
  * Handle message events (swipe, render, etc.)
  */
 async function handleMessageEvent(messageId) {
-    if (!settings.enabled) return;
+    console.log('[Story Guardian] handleMessageEvent triggered with messageId:', messageId);
 
-    const context = getContext();
-
-    // Get the actual message from chat array
-    let message;
-    if (typeof messageId === 'number') {
-        message = context.chat[messageId];
-    } else {
-        // Fallback: get last message
-        message = context.chat[context.chat.length - 1];
+    if (!settings.enabled) {
+        console.log('[Story Guardian] Extension disabled, skipping');
+        return;
     }
 
-    if (!message || message.is_user) return;
+    const context = getContext();
+    const chat = context.chat;
+
+    if (!chat || chat.length === 0) {
+        console.log('[Story Guardian] No chat messages available');
+        return;
+    }
+
+    // Get the last message (most recent AI response)
+    const message = chat[chat.length - 1];
+
+    console.log('[Story Guardian] Checking message:', {
+        isUser: message.is_user,
+        length: message.mes?.length,
+        preview: message.mes?.substring(0, 100)
+    });
+
+    if (!message || message.is_user) {
+        console.log('[Story Guardian] Skipping user message or null');
+        return;
+    }
 
     const messageText = message.mes;
     const analysis = analyzeMessage(messageText);
+
+    console.log('[Story Guardian] Analysis complete:', {
+        violations: analysis.violations.length,
+        wordCount: analysis.wordCount
+    });
 
     if (analysis.violations.length > 0) {
         console.log('[Story Guardian] Found violations:', analysis.violations);
 
         if (settings.autoCorrect) {
-            const correctedText = await correctMessage(messageText, analysis);
-            if (correctedText && correctedText !== messageText) {
-                // Modify the message object directly
-                message.mes = correctedText;
+            console.log('[Story Guardian] Starting auto-correction...');
 
-                console.log('[Story Guardian] Auto-corrected message');
+            try {
+                const correctedText = await correctMessage(messageText, analysis);
 
-                // Force re-render by directly updating the DOM element
-                const mesIndex = context.chat.indexOf(message);
-                const messageElement = $(`#chat .mes[mesid="${mesIndex}"]`);
+                console.log('[Story Guardian] Correction result:', {
+                    changed: correctedText !== messageText,
+                    originalLength: messageText.length,
+                    correctedLength: correctedText?.length
+                });
 
-                if (messageElement.length > 0) {
-                    // Update the text content
-                    const mesText = messageElement.find('.mes_text');
-                    if (mesText.length > 0) {
-                        // Use text() for plain text or html() if you need to preserve formatting
-                        mesText.html(correctedText);
+                if (correctedText && correctedText.trim() && correctedText !== messageText) {
+                    // Update the message object
+                    message.mes = correctedText;
+
+                    console.log('[Story Guardian] Message object updated');
+
+                    // Update DOM
+                    const mesIndex = chat.length - 1;
+                    const messageElement = $(`#chat .mes[mesid="${mesIndex}"]`);
+
+                    console.log('[Story Guardian] DOM update:', {
+                        mesIndex,
+                        elementFound: messageElement.length > 0
+                    });
+
+                    if (messageElement.length > 0) {
+                        const mesText = messageElement.find('.mes_text');
+                        if (mesText.length > 0) {
+                            mesText.html(correctedText);
+                            console.log('[Story Guardian] DOM element updated');
+                        }
                     }
+
+                    // Save the chat
+                    saveChatDebounced();
+
+                    // Show success notification
+                    if (typeof toastr !== 'undefined') {
+                        toastr.success(
+                            `Auto-corrected ${analysis.violations.length} violation(s)`,
+                            'Story Guardian - Message Corrected',
+                            { timeOut: 5000 }
+                        );
+                    }
+
+                    console.log('[Story Guardian] ✅ Auto-correction complete and saved');
+                } else {
+                    console.log('[Story Guardian] No changes made (empty or identical)');
                 }
-
-                // Save the corrected chat
-                saveChatDebounced();
-
-                console.log('[Story Guardian] Message updated in DOM and chat saved');
+            } catch (error) {
+                console.error('[Story Guardian] Auto-correction failed:', error);
+                if (typeof toastr !== 'undefined') {
+                    toastr.error(
+                        `Failed to auto-correct: ${error.message}`,
+                        'Story Guardian Error',
+                        { timeOut: 5000 }
+                    );
+                }
             }
         }
 
@@ -355,25 +408,33 @@ VIOLATIONS FOUND:
 ${violationDetails}
 
 INSTRUCTIONS:
-1. Fix the violations while preserving the core narrative and events
+1. Fix ALL violations completely and automatically
 2. For scene endings: Replace reflective/philosophical endings with concrete action, dialogue, sensory detail, or interruption
 3. For show-don't-tell: Replace emotion labels with physical sensations, body language, or environmental details
 4. For dialogue: Make speech more natural with contractions where appropriate
 5. Keep the same POV, tense, and character voice
 6. Make minimal changes - only fix what's broken
 
-Return ONLY the corrected text, nothing else. No explanations, no commentary.`;
+Return ONLY the corrected text, nothing else. No explanations, no commentary, no notes.`;
 
     try {
-        // Use the current LLM connection to generate the fix
-        const corrected = await generateQuietPrompt(correctionPrompt);
+        console.log('[Story Guardian] Calling generateRaw with correction prompt');
 
-        if (corrected && corrected.trim() && corrected !== text) {
-            console.log('[Story Guardian] LLM successfully corrected the text');
-            return corrected.trim();
+        // Use generateRaw to get LLM response
+        const result = await generateRaw(correctionPrompt, '', false, false);
+
+        console.log('[Story Guardian] generateRaw result:', {
+            hasResult: !!result,
+            length: result?.length,
+            preview: result?.substring(0, 100)
+        });
+
+        if (result && result.trim() && result !== text) {
+            console.log('[Story Guardian] ✓ LLM successfully corrected the text');
+            return result.trim();
         } else {
-            console.warn('[Story Guardian] LLM returned empty or unchanged text, keeping original');
-            return text;
+            console.warn('[Story Guardian] LLM returned empty or unchanged text, using fallback');
+            return await fallbackCorrection(text, analysis);
         }
     } catch (error) {
         console.error('[Story Guardian] LLM correction failed:', error);
