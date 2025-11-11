@@ -14,6 +14,7 @@ const defaultSettings = {
     enabled: true,
     autoCorrect: true,
     showWarnings: true,
+    showNoViolations: false,
     strictMode: false,
     guidelines: '',
     validationRules: {
@@ -177,6 +178,19 @@ async function handleMessageReceived(data) {
 
             if (settings.showWarnings) {
                 showWarnings(analysis.violations);
+            }
+        } else {
+            // No violations found
+            console.log('[Story Guardian] No violations detected');
+
+            if (settings.showNoViolations) {
+                if (typeof toastr !== 'undefined') {
+                    toastr.success(
+                        `Message passed all validation checks! (${analysis.wordCount} words)`,
+                        'Story Guardian ✓',
+                        { timeOut: 3000 }
+                    );
+                }
             }
         }
     }
@@ -460,6 +474,10 @@ async function loadSettingsHTML() {
                         <span>Show warnings</span>
                     </label>
                     <label class="checkbox_label">
+                        <input type="checkbox" id="story_guardian_show_no_violations" />
+                        <span>Show notification when no violations found (for testing)</span>
+                    </label>
+                    <label class="checkbox_label">
                         <input type="checkbox" id="story_guardian_strict_mode" />
                         <span>Strict mode (more aggressive validation)</span>
                     </label>
@@ -499,6 +517,11 @@ async function loadSettingsHTML() {
 
     $('#story_guardian_show_warnings').prop('checked', settings.showWarnings).on('change', function () {
         settings.showWarnings = $(this).prop('checked');
+        saveSettings();
+    });
+
+    $('#story_guardian_show_no_violations').prop('checked', settings.showNoViolations).on('change', function () {
+        settings.showNoViolations = $(this).prop('checked');
         saveSettings();
     });
 
