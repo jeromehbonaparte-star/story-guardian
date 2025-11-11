@@ -1,6 +1,6 @@
 {
     "display_name": "Story Guardian",
-    "loading_order": 50,
+    "loading_order": 100,
     "requires": [],
     "optional": [],
     "js": "index.js",
