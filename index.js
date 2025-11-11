@@ -84,8 +84,9 @@ async function init() {
     }
 
     // Register event listeners
-    eventSource.on(event_types.MESSAGE_RECEIVED, handleMessageReceived);
-    eventSource.on(event_types.MESSAGE_SWIPED, handleMessageSwiped);
+    // Use MESSAGE_SWIPED to catch all message events (including generation)
+    eventSource.on(event_types.MESSAGE_SWIPED, handleMessageEvent);
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleMessageEvent);
 
     // Add UI
     await loadSettingsHTML();
@@ -144,63 +145,75 @@ REQUIRED ENDING TYPES:
 }
 
 /**
- * Handle incoming AI message
+ * Handle message events (swipe, render, etc.)
  */
-async function handleMessageReceived(data) {
+async function handleMessageEvent(messageId) {
     if (!settings.enabled) return;
 
     const context = getContext();
-    const lastMessage = context.chat[context.chat.length - 1];
 
-    if (lastMessage && !lastMessage.is_user) {
-        const messageText = lastMessage.mes;
-        const analysis = analyzeMessage(messageText);
+    // Get the actual message from chat array
+    let message;
+    if (typeof messageId === 'number') {
+        message = context.chat[messageId];
+    } else {
+        // Fallback: get last message
+        message = context.chat[context.chat.length - 1];
+    }
 
-        if (analysis.violations.length > 0) {
-            console.log('[Story Guardian] Found violations:', analysis.violations);
+    if (!message || message.is_user) return;
 
-            if (settings.autoCorrect) {
-                const correctedText = await correctMessage(messageText, analysis);
-                if (correctedText !== messageText) {
-                    lastMessage.mes = correctedText;
-                    console.log('[Story Guardian] Auto-corrected message');
+    const messageText = message.mes;
+    const analysis = analyzeMessage(messageText);
 
-                    // Re-render the message in the UI
-                    const messageElement = $(`#chat .mes[mesid="${context.chat.length - 1}"] .mes_text`);
-                    if (messageElement.length > 0) {
-                        messageElement.html(correctedText);
+    if (analysis.violations.length > 0) {
+        console.log('[Story Guardian] Found violations:', analysis.violations);
+
+        if (settings.autoCorrect) {
+            const correctedText = await correctMessage(messageText, analysis);
+            if (correctedText && correctedText !== messageText) {
+                // Modify the message object directly
+                message.mes = correctedText;
+
+                console.log('[Story Guardian] Auto-corrected message');
+
+                // Force re-render by directly updating the DOM element
+                const mesIndex = context.chat.indexOf(message);
+                const messageElement = $(`#chat .mes[mesid="${mesIndex}"]`);
+
+                if (messageElement.length > 0) {
+                    // Update the text content
+                    const mesText = messageElement.find('.mes_text');
+                    if (mesText.length > 0) {
+                        // Use text() for plain text or html() if you need to preserve formatting
+                        mesText.html(correctedText);
                     }
-
-                    // Save the corrected chat
-                    saveChatDebounced();
                 }
-            }
 
-            if (settings.showWarnings) {
-                showWarnings(analysis.violations);
-            }
-        } else {
-            // No violations found
-            console.log('[Story Guardian] No violations detected');
+                // Save the corrected chat
+                saveChatDebounced();
 
-            if (settings.showNoViolations) {
-                if (typeof toastr !== 'undefined') {
-                    toastr.success(
-                        `Message passed all validation checks! (${analysis.wordCount} words)`,
-                        'Story Guardian ✓',
-                        { timeOut: 3000 }
-                    );
-                }
+                console.log('[Story Guardian] Message updated in DOM and chat saved');
+            }
+        }
+
+        if (settings.showWarnings) {
+            showWarnings(analysis.violations);
+        }
+    } else {
+        // No violations found
+        console.log('[Story Guardian] No violations detected');
+
+        if (settings.showNoViolations) {
+            if (typeof toastr !== 'undefined') {
+                toastr.success(
+                    `Message passed all validation checks! (${analysis.wordCount} words)`,
+                    'Story Guardian ✓',
+                    { timeOut: 3000 }
+                );
             }
         }
     }
-}
-
-/**
- * Handle message swipe
- */
-async function handleMessageSwiped(data) {
-    await handleMessageReceived(data);
 }
 
 /**
