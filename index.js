@@ -4,9 +4,7 @@
  */
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced, generateRaw, substituteParams, registerSlashCommand } from '../../../../script.js';
-import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
-import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
+import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced, generateRaw, substituteParams } from '../../../../script.js';
 
 const extensionName = 'story-guardian';
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
@@ -203,10 +201,8 @@ async function init() {
     eventSource.on(event_types.MESSAGE_RECEIVED, handleMessageEvent);
     eventSource.on(event_types.MESSAGE_SWIPED, handleMessageEvent);
 
-    // Register slash command
-    registerSlashCommand('sg-fix', sgFixCommand, [],
-        '<span class="monospace">/sg-fix</span> – Run Story Guardian validation and auto-correction on the current message',
-        true, true);
+    // Make sgFixCommand available globally for manual execution
+    window.storyGuardianFix = sgFixCommand;
 
     // Add UI
     await loadSettingsHTML();
@@ -807,6 +803,17 @@ async function loadSettingsHTML() {
                         <span>Check dialogue naturalness</span>
                     </label>
 
+                    <h4>Manual Actions</h4>
+                    <div class="story-guardian-actions">
+                        <button id="story_guardian_fix_button" class="menu_button">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            Fix Current Message
+                        </button>
+                        <small style="opacity: 0.7; display: block; margin-top: 5px;">
+                            Run Story Guardian validation and correction on the last AI message
+                        </small>
+                    </div>
+
                     <div id="story-guardian-warnings" style="display: none;"></div>
                 </div>
             </div>
@@ -854,6 +861,11 @@ async function loadSettingsHTML() {
     $('#story_guardian_rule_dialogue').prop('checked', settings.validationRules.dialogueNaturalness).on('change', function () {
         settings.validationRules.dialogueNaturalness = $(this).prop('checked');
         saveSettings();
+    });
+
+    // Bind the fix button
+    $('#story_guardian_fix_button').on('click', async function () {
+        await sgFixCommand();
     });
 }
 
