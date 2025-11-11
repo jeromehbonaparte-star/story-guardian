@@ -392,57 +392,151 @@ function checkDialogue(text) {
  * Auto-correct message based on violations using LLM
  */
 async function correctMessage(text, analysis) {
-    console.log('[Story Guardian] Starting LLM-powered auto-correction...');
+    console.log('[Story Guardian] Starting auto-correction...');
 
-    // Build correction prompt based on violations
-    const violationDetails = analysis.violations.map(v => {
-        return `- ${v.type}: ${v.message}${v.text ? `\n  Problem text: "${v.text.substring(0, 100)}..."` : ''}`;
-    }).join('\n');
+    // Separate violations by severity
+    const highSeverityViolations = analysis.violations.filter(v =>
+        v.severity === 'high' || v.severity === 'medium'
+    );
+    const lowSeverityViolations = analysis.violations.filter(v =>
+        v.severity === 'low'
+    );
 
-    const correctionPrompt = `You are a writing assistant helping to fix storytelling guideline violations.
+    console.log('[Story Guardian] Violations breakdown:', {
+        high: highSeverityViolations.length,
+        low: lowSeverityViolations.length
+    });
+
+    let correctedText = text;
+
+    // First apply simple regex fixes for low-severity violations (dialogue contractions)
+    if (lowSeverityViolations.length > 0) {
+        console.log('[Story Guardian] Applying simple regex fixes for low-severity violations...');
+        correctedText = applySimpleDialogueFixes(correctedText);
+    }
+
+    // Only use LLM for high/medium severity violations
+    if (highSeverityViolations.length > 0) {
+        console.log('[Story Guardian] Using LLM for high/medium severity violations...');
+
+        const violationDetails = highSeverityViolations.map(v => {
+            return `- ${v.type}: ${v.message}${v.text ? `\n  Problem text: "${v.text.substring(0, 100)}..."` : ''}`;
+        }).join('\n');
+
+        const correctionPrompt = `You are a writing assistant helping to fix storytelling guideline violations.
+
+CRITICAL: You MUST preserve the story content, characters, setting, and events. Only fix the specific violations listed below. Do NOT rewrite or change the narrative.
 
 ORIGINAL TEXT:
-${text}
+${correctedText}
 
-VIOLATIONS FOUND:
+VIOLATIONS TO FIX:
 ${violationDetails}
 
 INSTRUCTIONS:
-1. Fix ALL violations completely and automatically
-2. For scene endings: Replace reflective/philosophical endings with concrete action, dialogue, sensory detail, or interruption
-3. For show-don't-tell: Replace emotion labels with physical sensations, body language, or environmental details
-4. For dialogue: Make speech more natural with contractions where appropriate
-5. Keep the same POV, tense, and character voice
-6. Make minimal changes - only fix what's broken
+1. ONLY fix the violations listed above - do NOT change anything else
+2. For scene endings: Replace ONLY the last 1-2 problematic sentences with concrete action, dialogue, or sensory detail
+3. For show-don't-tell: Replace ONLY the emotion labels with physical sensations or body language
+4. PRESERVE all character names, dialogue content, actions, and story events
+5. Keep the exact same POV, tense, and voice
+6. The corrected text should be 95%+ identical to the original - MINIMAL changes only
 
 Return ONLY the corrected text, nothing else. No explanations, no commentary, no notes.`;
 
-    try {
-        console.log('[Story Guardian] Calling generateRaw with correction prompt');
+        try {
+            console.log('[Story Guardian] Calling generateRaw with correction prompt');
 
-        // Use generateRaw to get LLM response
-        const result = await generateRaw(correctionPrompt, '', false, false);
+            // Use generateRaw to get LLM response
+            const result = await generateRaw(correctionPrompt, '', false, false);
 
-        console.log('[Story Guardian] generateRaw result:', {
-            hasResult: !!result,
-            length: result?.length,
-            preview: result?.substring(0, 100)
-        });
+            console.log('[Story Guardian] generateRaw result:', {
+                hasResult: !!result,
+                length: result?.length,
+                preview: result?.substring(0, 100)
+            });
 
-        if (result && result.trim() && result !== text) {
-            console.log('[Story Guardian] ✓ LLM successfully corrected the text');
-            return result.trim();
-        } else {
-            console.warn('[Story Guardian] LLM returned empty or unchanged text, using fallback');
-            return await fallbackCorrection(text, analysis);
+            if (result && result.trim() && result !== correctedText) {
+                // Validate similarity to prevent rewrites
+                const similarity = calculateSimilarity(correctedText, result.trim());
+                console.log('[Story Guardian] Similarity check:', {
+                    similarity: `${(similarity * 100).toFixed(1)}%`,
+                    threshold: '70%'
+                });
+
+                if (similarity >= 0.70) {
+                    console.log('[Story Guardian] ✓ LLM correction accepted (similarity OK)');
+                    correctedText = result.trim();
+                } else {
+                    console.warn('[Story Guardian] ⚠️ LLM changed too much content (similarity too low), using fallback');
+                    correctedText = await fallbackCorrection(correctedText, analysis);
+                }
+            } else {
+                console.warn('[Story Guardian] LLM returned empty or unchanged text, using fallback');
+                correctedText = await fallbackCorrection(correctedText, analysis);
+            }
+        } catch (error) {
+            console.error('[Story Guardian] LLM correction failed:', error);
+            console.log('[Story Guardian] Falling back to simple pattern-based fixes');
+            correctedText = await fallbackCorrection(correctedText, analysis);
         }
-    } catch (error) {
-        console.error('[Story Guardian] LLM correction failed:', error);
-        console.log('[Story Guardian] Falling back to simple pattern-based fixes');
-
-        // Fallback to simple fixes if LLM fails
-        return await fallbackCorrection(text, analysis);
     }
+
+    return correctedText;
+}
+
+/**
+ * Apply simple regex-based fixes for dialogue contractions
+ */
+function applySimpleDialogueFixes(text) {
+    let fixed = text;
+
+    // Only fix contractions in dialogue (between quotes)
+    // Replace "I am" with "I'm" in dialogue
+    fixed = fixed.replace(/"([^"]*?)\bI am\b([^"]*?)"/g, (match, before, after) => {
+        // Don't change if it's emphatic or formal speech
+        if (after.match(/^\s+(the|a|an|your|so)\b/i)) {
+            return `"${before}I'm${after}"`;
+        }
+        return match;
+    });
+
+    // Replace other common contractions in dialogue
+    fixed = fixed.replace(/"([^"]*?)\b(you|we|they) are\b([^"]*?)"/gi, (match, before, pronoun, after) => {
+        return `"${before}${pronoun.toLowerCase()}'re${after}"`;
+    });
+
+    fixed = fixed.replace(/"([^"]*?)\b(I|you|we|they) have\b([^"]*?)"/gi, (match, before, pronoun, after) => {
+        return `"${before}${pronoun.toLowerCase()}'ve${after}"`;
+    });
+
+    fixed = fixed.replace(/"([^"]*?)\b(I|you|we|they) will\b([^"]*?)"/gi, (match, before, pronoun, after) => {
+        return `"${before}${pronoun.toLowerCase()}'ll${after}"`;
+    });
+
+    console.log('[Story Guardian] Applied simple dialogue fixes:', {
+        changed: fixed !== text,
+        changes: fixed.length - text.length
+    });
+
+    return fixed;
+}
+
+/**
+ * Calculate similarity between two texts (0-1 scale)
+ */
+function calculateSimilarity(text1, text2) {
+    // Simple word-based similarity check
+    const words1 = text1.toLowerCase().split(/\s+/);
+    const words2 = text2.toLowerCase().split(/\s+/);
+
+    // Count matching words
+    const set1 = new Set(words1);
+    const set2 = new Set(words2);
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+
+    const union = new Set([...set1, ...set2]);
+
+    return intersection.size / union.size;
 }
 
 /**
