@@ -4,7 +4,9 @@
  */
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced, generateRaw, substituteParams } from '../../../../script.js';
+import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced, generateRaw, substituteParams, registerSlashCommand } from '../../../../script.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 
 const extensionName = 'story-guardian';
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
@@ -67,6 +69,120 @@ const GOOD_ENDING_TYPES = {
 };
 
 /**
+ * Slash command handler: /sg-fix
+ * Runs Story Guardian on the current message
+ */
+async function sgFixCommand() {
+    console.log('[Story Guardian] /sg-fix command triggered');
+
+    const context = getContext();
+    const chat = context.chat;
+
+    if (!chat || chat.length === 0) {
+        toastr.warning('No messages in chat to validate', 'Story Guardian');
+        return '';
+    }
+
+    // Get the last AI message (skip user messages)
+    let targetMessage = null;
+    let targetIndex = -1;
+
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (!chat[i].is_user) {
+            targetMessage = chat[i];
+            targetIndex = i;
+            break;
+        }
+    }
+
+    if (!targetMessage) {
+        toastr.warning('No AI messages found to validate', 'Story Guardian');
+        return '';
+    }
+
+    console.log('[Story Guardian] Running validation on message:', {
+        index: targetIndex,
+        length: targetMessage.mes?.length,
+        preview: targetMessage.mes?.substring(0, 100)
+    });
+
+    const messageText = targetMessage.mes;
+
+    // Analyze the message
+    const analysis = analyzeMessage(messageText);
+
+    console.log('[Story Guardian] Analysis complete:', {
+        violations: analysis.violations.length,
+        wordCount: analysis.wordCount
+    });
+
+    if (analysis.violations.length === 0) {
+        toastr.success('No violations found! ✓', 'Story Guardian', { timeOut: 3000 });
+        return '';
+    }
+
+    // Show violations found
+    toastr.info(
+        `Found ${analysis.violations.length} violation(s). ${settings.autoCorrect ? 'Applying fixes...' : 'Auto-correction disabled.'}`,
+        'Story Guardian',
+        { timeOut: 3000 }
+    );
+
+    if (settings.autoCorrect) {
+        try {
+            const correctedText = await correctMessage(messageText, analysis);
+
+            if (correctedText && correctedText.trim() && correctedText !== messageText) {
+                // Update the message object
+                targetMessage.mes = correctedText;
+
+                console.log('[Story Guardian] Message corrected via command');
+
+                // Update DOM
+                const messageElement = $(`#chat .mes[mesid="${targetIndex}"]`);
+                if (messageElement.length > 0) {
+                    const mesText = messageElement.find('.mes_text');
+                    if (mesText.length > 0) {
+                        mesText.html(correctedText);
+                        console.log('[Story Guardian] DOM updated via command');
+                    }
+                }
+
+                // Save the chat
+                saveChatDebounced();
+
+                // Show success notification
+                toastr.success(
+                    `✓ Fixed ${analysis.violations.length} violation(s)`,
+                    'Story Guardian - Corrected',
+                    { timeOut: 5000 }
+                );
+            } else {
+                toastr.warning('No changes made - correction returned same text', 'Story Guardian');
+            }
+        } catch (error) {
+            console.error('[Story Guardian] Command correction failed:', error);
+            toastr.error(`Correction failed: ${error.message}`, 'Story Guardian');
+        }
+    } else {
+        // Just show the violations
+        console.log('[Story Guardian] Violations:', analysis.violations);
+
+        const violationList = analysis.violations.map(v =>
+            `• ${v.type} (${v.severity}): ${v.message}`
+        ).join('\n');
+
+        toastr.warning(
+            `Found violations:\n${violationList}`,
+            'Story Guardian',
+            { timeOut: 10000 }
+        );
+    }
+
+    return '';
+}
+
+/**
  * Initialize the extension
  */
 async function init() {
@@ -86,6 +202,11 @@ async function init() {
     // Register event listeners
     eventSource.on(event_types.MESSAGE_RECEIVED, handleMessageEvent);
     eventSource.on(event_types.MESSAGE_SWIPED, handleMessageEvent);
+
+    // Register slash command
+    registerSlashCommand('sg-fix', sgFixCommand, [],
+        '<span class="monospace">/sg-fix</span> – Run Story Guardian validation and auto-correction on the current message',
+        true, true);
 
     // Add UI
     await loadSettingsHTML();
