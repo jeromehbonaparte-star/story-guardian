@@ -4,7 +4,7 @@
  */
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
+import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced } from '../../../../script.js';
 
 const extensionName = 'story-guardian';
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
@@ -163,6 +163,15 @@ async function handleMessageReceived(data) {
                 if (correctedText !== messageText) {
                     lastMessage.mes = correctedText;
                     console.log('[Story Guardian] Auto-corrected message');
+
+                    // Re-render the message in the UI
+                    const messageElement = $(`#chat .mes[mesid="${context.chat.length - 1}"] .mes_text`);
+                    if (messageElement.length > 0) {
+                        messageElement.html(correctedText);
+                    }
+
+                    // Save the corrected chat
+                    saveChatDebounced();
                 }
             }
 
@@ -380,26 +389,50 @@ function getLastSentences(text, n = 3) {
 function showWarnings(violations) {
     if (violations.length === 0) return;
 
-    const warningDiv = document.getElementById('story-guardian-warnings');
-    if (!warningDiv) return;
+    // Group violations by severity
+    const highSeverity = violations.filter(v => v.severity === 'high');
+    const mediumSeverity = violations.filter(v => v.severity === 'medium');
+    const lowSeverity = violations.filter(v => v.severity === 'low');
 
-    let html = '<div class="story-guardian-warning-list">';
-    html += `<h4>Story Guardian found ${violations.length} guideline violation(s):</h4>`;
+    // Build warning message
+    let message = `Found ${violations.length} guideline violation(s):\n\n`;
 
-    for (const violation of violations) {
-        const severityClass = `severity-${violation.severity}`;
-        html += `<div class="warning-item ${severityClass}">`;
-        html += `<span class="warning-type">${violation.type}</span>`;
-        html += `<span class="warning-message">${violation.message}</span>`;
-        if (violation.text) {
-            html += `<div class="warning-text">"${violation.text}"</div>`;
-        }
-        html += `</div>`;
+    if (highSeverity.length > 0) {
+        message += `🔴 High Priority (${highSeverity.length}):\n`;
+        highSeverity.forEach(v => {
+            message += `  • ${v.type}: ${v.message}\n`;
+            if (v.text) message += `    "${v.text.substring(0, 60)}..."\n`;
+        });
+        message += '\n';
     }
 
-    html += '</div>';
-    warningDiv.innerHTML = html;
-    warningDiv.style.display = 'block';
+    if (mediumSeverity.length > 0) {
+        message += `🟡 Medium Priority (${mediumSeverity.length}):\n`;
+        mediumSeverity.forEach(v => {
+            message += `  • ${v.type}: ${v.message}\n`;
+        });
+        message += '\n';
+    }
+
+    if (lowSeverity.length > 0) {
+        message += `🟢 Low Priority (${lowSeverity.length}):\n`;
+        lowSeverity.forEach(v => {
+            message += `  • ${v.type}: ${v.message}\n`;
+        });
+    }
+
+    // Show notification based on highest severity
+    if (typeof toastr !== 'undefined') {
+        if (highSeverity.length > 0) {
+            toastr.error(message, 'Story Guardian', { timeOut: 10000 });
+        } else if (mediumSeverity.length > 0) {
+            toastr.warning(message, 'Story Guardian', { timeOut: 8000 });
+        } else {
+            toastr.info(message, 'Story Guardian', { timeOut: 6000 });
+        }
+    } else {
+        console.warn('[Story Guardian] Violations detected:', message);
+    }
 }
 
 /**
