@@ -4,7 +4,7 @@
  */
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced } from '../../../../script.js';
+import { eventSource, event_types, saveSettingsDebounced, saveChatDebounced, generateQuietPrompt } from '../../../../script.js';
 
 const extensionName = 'story-guardian';
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
@@ -323,67 +323,89 @@ function checkDialogue(text) {
 }
 
 /**
- * Auto-correct message based on violations
+ * Auto-correct message based on violations using LLM
  */
 async function correctMessage(text, analysis) {
-    let corrected = text;
+    console.log('[Story Guardian] Starting LLM-powered auto-correction...');
 
-    // Fix scene endings
-    const endingViolations = analysis.violations.filter(v => v.type === 'scene_ending');
-    if (endingViolations.length > 0) {
-        corrected = await fixSceneEnding(corrected, analysis.lastSentences);
+    // Build correction prompt based on violations
+    const violationDetails = analysis.violations.map(v => {
+        return `- ${v.type}: ${v.message}${v.text ? `\n  Problem text: "${v.text.substring(0, 100)}..."` : ''}`;
+    }).join('\n');
+
+    const correctionPrompt = `You are a writing assistant helping to fix storytelling guideline violations.
+
+ORIGINAL TEXT:
+${text}
+
+VIOLATIONS FOUND:
+${violationDetails}
+
+INSTRUCTIONS:
+1. Fix the violations while preserving the core narrative and events
+2. For scene endings: Replace reflective/philosophical endings with concrete action, dialogue, sensory detail, or interruption
+3. For show-don't-tell: Replace emotion labels with physical sensations, body language, or environmental details
+4. For dialogue: Make speech more natural with contractions where appropriate
+5. Keep the same POV, tense, and character voice
+6. Make minimal changes - only fix what's broken
+
+Return ONLY the corrected text, nothing else. No explanations, no commentary.`;
+
+    try {
+        // Use the current LLM connection to generate the fix
+        const corrected = await generateQuietPrompt(correctionPrompt);
+
+        if (corrected && corrected.trim() && corrected !== text) {
+            console.log('[Story Guardian] LLM successfully corrected the text');
+            return corrected.trim();
+        } else {
+            console.warn('[Story Guardian] LLM returned empty or unchanged text, keeping original');
+            return text;
+        }
+    } catch (error) {
+        console.error('[Story Guardian] LLM correction failed:', error);
+        console.log('[Story Guardian] Falling back to simple pattern-based fixes');
+
+        // Fallback to simple fixes if LLM fails
+        return await fallbackCorrection(text, analysis);
     }
-
-    // Fix emotion labels
-    const emotionViolations = analysis.violations.filter(v => v.type === 'show_dont_tell');
-    if (emotionViolations.length > 0) {
-        corrected = fixEmotionLabels(corrected, emotionViolations);
-    }
-
-    return corrected;
 }
 
 /**
- * Fix scene ending by removing last reflective sentences
+ * Fallback correction when LLM fails - uses simple pattern-based fixes
  */
-async function fixSceneEnding(text, lastSentences) {
-    // Remove the last 1-2 sentences if they're reflective
-    const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
+async function fallbackCorrection(text, analysis) {
+    let corrected = text;
 
-    if (sentences.length > 2) {
-        // Check if last sentence is problematic
-        const lastSentence = sentences[sentences.length - 1];
-        const isProblematic = FORBIDDEN_PATTERNS.some(pattern => pattern.test(lastSentence));
+    // Fix scene endings by removing problematic sentences
+    const endingViolations = analysis.violations.filter(v => v.type === 'scene_ending');
+    if (endingViolations.length > 0) {
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
 
-        if (isProblematic) {
-            // Remove last sentence
-            sentences.pop();
+        if (sentences.length > 2) {
+            const lastSentence = sentences[sentences.length - 1];
+            const isProblematic = FORBIDDEN_PATTERNS.some(pattern => pattern.test(lastSentence));
 
-            // Check if second-to-last is also problematic
-            const secondLast = sentences[sentences.length - 1];
-            if (FORBIDDEN_PATTERNS.some(pattern => pattern.test(secondLast))) {
+            if (isProblematic) {
                 sentences.pop();
+                const secondLast = sentences[sentences.length - 1];
+                if (FORBIDDEN_PATTERNS.some(pattern => pattern.test(secondLast))) {
+                    sentences.pop();
+                }
+                corrected = sentences.join(' ');
             }
-
-            return sentences.join(' ');
         }
     }
 
-    return text;
-}
-
-/**
- * Fix emotion labels by removing or commenting them
- */
-function fixEmotionLabels(text, violations) {
-    let corrected = text;
-
-    for (const violation of violations) {
-        // For now, just mark them with a comment
-        corrected = corrected.replace(
-            violation.text,
-            `[SHOW-DON'T-TELL: ${violation.text}]`
-        );
+    // Fix emotion labels by marking them
+    const emotionViolations = analysis.violations.filter(v => v.type === 'show_dont_tell');
+    if (emotionViolations.length > 0) {
+        for (const violation of emotionViolations) {
+            corrected = corrected.replace(
+                violation.text,
+                `[SHOW-DON'T-TELL: ${violation.text}]`
+            );
+        }
     }
 
     return corrected;
